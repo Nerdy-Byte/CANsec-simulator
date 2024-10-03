@@ -1,129 +1,185 @@
-import can
+import hashlib
+import hmac
+import random
+import string
+import json
 import os
-import time
-import logging
-import yaml
+import base64
+import threading
+import queue
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import padding
-from cryptography.hazmat.primitives.hmac import HMAC
-from cryptography.hazmat.primitives import hashes
+from datetime import datetime, timedelta
 
-# Load keys from the YAML file
-with open('cansec_data.yml') as file:
-    data = yaml.safe_load(file)
+# Constants
+CAN_ID = 0x123  # Example CAN ID
+KEY_ROTATION_INTERVAL = timedelta(seconds=30)  # Key rotation interval
+KEY_SIZE = 32  # AES key size (256 bits)
+MAX_PACKET_NUMBER = 100  # Maximum packet number before key rotation
+SECURE_ZONE_KEY_SIZE = 32  # Secure Zone Key size
 
-CAK = bytes.fromhex(data['CAK'])  # 128-bit key for encryption and decryption
-SAK = bytes.fromhex(data['SAK'])  # 128-bit key for HMAC authentication
+# Function to generate a random payload
+def generate_payload(size=16):
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=size))
 
-# Setup logger
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger('CANsec')
+# Function to create a new encryption key
+def generate_key():
+    return os.urandom(KEY_SIZE)
 
-def encrypt_message(plaintext, key):
-    # Pad the plaintext to be a multiple of block size (AES 128-bit)
-    padder = padding.PKCS7(128).padder()
-    padded_data = padder.update(plaintext) + padder.finalize()
+# Function to create a secure zone key
+def generate_secure_zone_key():
+    return os.urandom(SECURE_ZONE_KEY_SIZE)
 
-    # Generate a random IV for encryption
+# Function to pad the data
+def pad(data):
+    block_size = algorithms.AES.block_size // 8
+    padding_length = block_size - (len(data) % block_size)
+    padding = bytes([padding_length] * padding_length)
+    return data + padding
+
+# Function to unpad the data
+def unpad(data):
+    padding_length = data[-1]
+    return data[:-padding_length]
+
+# Function to encrypt the message payload
+def encrypt_payload(payload, key):
     iv = os.urandom(16)
-
-    # AES CBC mode encryption
     cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
     encryptor = cipher.encryptor()
-    ciphertext = encryptor.update(padded_data) + encryptor.finalize()
+    padded_payload = pad(payload.encode())
+    encrypted_payload = encryptor.update(padded_payload) + encryptor.finalize()
+    return iv + encrypted_payload  # Prepend IV for decryption
 
-    return iv + ciphertext  # Return IV + Ciphertext
-
-def decrypt_message(ciphertext, key):
-    # Split the IV and the actual ciphertext
-    iv = ciphertext[:16]
-    actual_ciphertext = ciphertext[16:]
-
-    # AES CBC mode decryption
+# Function to decrypt the message payload
+def decrypt_payload(encrypted_payload, key):
+    iv = encrypted_payload[:16]  # Extract IV (first 16 bytes)
     cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
     decryptor = cipher.decryptor()
-    decrypted_padded_data = decryptor.update(actual_ciphertext) + decryptor.finalize()
+    decrypted_payload = decryptor.update(encrypted_payload[16:]) + decryptor.finalize()
+    return unpad(decrypted_payload).decode()
 
-    # Unpad the decrypted data
-    unpadder = padding.PKCS7(128).unpadder()
-    decrypted_data = unpadder.update(decrypted_padded_data) + unpadder.finalize()
+# Function to sign the message
+def sign_message(message, key):
+    message_json = json.dumps(message).encode()
+    signature = hmac.new(key, message_json, hashlib.sha256).hexdigest()
+    return signature
 
-    return decrypted_data
+# Function to verify the message
+def verify_message(message, signature, key):
+    expected_signature = sign_message(message, key)
+    return hmac.compare_digest(expected_signature, signature)
 
-def generate_hmac(data, key):
-    h = HMAC(key, hashes.SHA256(), backend=default_backend())
-    h.update(data)
-    return h.finalize()
+# Security Association class for secure channels
+class SecurityAssociation:
+    def __init__(self):
+        self.secure_zone_key = generate_secure_zone_key()
+        self.channels = {}  # Dictionary to hold session keys for each channel
+        self.packet_counts = {}  # Dictionary to hold packet counts for each channel
 
-def verify_hmac(data, received_hmac, key):
-    h = HMAC(key, hashes.SHA256(), backend=default_backend())
-    h.update(data)
-    try:
-        h.verify(received_hmac)
-        return True
-    except:
-        return False
+    def create_channel(self, channel_id):
+        # Create a new secure channel with a new session key and initialize packet count
+        self.channels[channel_id] = generate_key()
+        self.packet_counts[channel_id] = 0  # Initialize packet count for the channel
 
-# CANsec message structure: [IV + Ciphertext + HMAC]
+    def get_session_key(self, channel_id):
+        return self.channels.get(channel_id)
 
-def send_secure_can_message(bus, message_id, plaintext):
-    # Encrypt the message
-    encrypted_message = encrypt_message(plaintext, CAK)
+    def increment_packet_count(self, channel_id):
+        self.packet_counts[channel_id] += 1
+        return self.packet_counts[channel_id]
 
-    # Generate HMAC for the encrypted message
-    hmac = generate_hmac(encrypted_message, SAK)
+    def reset_packet_count(self, channel_id):
+        self.packet_counts[channel_id] = 0
 
-    # Construct the CAN payload with encrypted message + HMAC
-    can_payload = encrypted_message + hmac
+# Node class to represent each CANsec node
+class CANsecNode(threading.Thread):
+    def __init__(self, node_id, message_queue):
+        super().__init__()
+        self.node_id = node_id
+        self.security_association = SecurityAssociation()  # Each node has its own SA
+        self.key_rotation_time = datetime.now() + KEY_ROTATION_INTERVAL
+        self.message_queue = message_queue
+        # Create secure channels
+        for channel_id in range(3):  # Create 3 secure channels per node
+            self.security_association.create_channel(channel_id)
 
-    # Split payload into CAN frames (max 8 bytes per frame)
-    frames = [can_payload[i:i+8] for i in range(0, len(can_payload), 8)]
+    def run(self):
+        while True:
+            # Create a CANsec message
+            channel_id = random.choice(list(self.security_association.channels.keys()))  # Randomly select a channel
+            message = self.create_cansec_message(channel_id)
+            print(f"Node {self.node_id} created message for channel {channel_id}:", message)
 
-    for frame_data in frames:
-        # Create and send CAN message
-        msg = can.Message(arbitration_id=message_id, data=frame_data, is_extended_id=False)
-        bus.send(msg)
-        logger.info(f"Sent CAN frame: {msg}")
+            # Check if we need to rotate keys for the specific channel
+            if self.security_association.packet_counts[channel_id] >= MAX_PACKET_NUMBER:
+                # Rotate keys in a separate thread to allow simultaneous processing
+                key_rotation_thread = threading.Thread(target=self.rotate_key_for_channel, args=(channel_id,))
+                key_rotation_thread.start()
 
-def receive_secure_can_message(bus, message_id, expected_length):
-    frames = []
-    total_length = 0
+            # Get the current session key for the selected channel
+            current_key = self.security_association.get_session_key(channel_id)
+            # Encrypt the message payload
+            encrypted_payload = encrypt_payload(message['payload'], current_key)
+            message['payload'] = base64.b64encode(encrypted_payload).decode()  # Store encrypted payload as base64
+            signature = sign_message(message, current_key)
+            print(f"Node {self.node_id} message signature:", signature)
 
-    while total_length < expected_length:
-        msg = bus.recv()
-        if msg.arbitration_id == message_id:
-            frames.append(msg.data)
-            total_length += len(msg.data)
+            # Simulate sending the message to the queue
+            self.message_queue.put((message, signature, channel_id))
 
-    # Reconstruct the payload from received frames
-    received_payload = b''.join(frames)
+            # Increment the packet count for the channel
+            self.security_association.increment_packet_count(channel_id)
 
-    # Split into encrypted message and HMAC
-    encrypted_message = received_payload[:-32]  # Exclude the last 32 bytes for HMAC
-    received_hmac = received_payload[-32:]
+            # Simulate receiving messages from other nodes
+            while not self.message_queue.empty():
+                received_message, received_signature, received_channel_id = self.message_queue.get()
+                self.receive_message(received_message, received_signature, received_channel_id)
 
-    # Verify HMAC
-    if not verify_hmac(encrypted_message, received_hmac, SAK):
-        logger.error("HMAC verification failed! Message may be tampered.")
-        return None
+    def create_cansec_message(self, channel_id):
+        payload = generate_payload()
+        message = {
+            'id': CAN_ID,
+            'payload': payload,
+            'channel_id': channel_id  # Include channel ID in the message
+        }
+        return message
 
-    # Decrypt the message
-    decrypted_message = decrypt_message(encrypted_message, CAK)
-    logger.info(f"Received and decrypted CAN message: {decrypted_message}")
-    return decrypted_message
+    def rotate_key_for_channel(self, channel_id):
+        # Print old key before rotation
+        print(f"Node {self.node_id} rotating key for channel {channel_id}:")
+        old_key = self.security_association.get_session_key(channel_id)
+        print(f" - Old key for channel {channel_id}: {base64.b64encode(old_key).decode()}")
 
-# Main CANsec communication loop
+        # Rotate session key for the specific channel
+        self.security_association.channels[channel_id] = generate_key()
+
+        # Print new key after rotation
+        new_key = self.security_association.get_session_key(channel_id)
+        print(f" - New key for channel {channel_id}: {base64.b64encode(new_key).decode()}")
+
+        # Reset the packet count for the channel after key rotation
+        self.security_association.reset_packet_count(channel_id)
+
+    def receive_message(self, message, signature, channel_id):
+        # Verify the received message using the appropriate session key
+        current_key = self.security_association.get_session_key(channel_id)
+        if verify_message(message, signature, current_key):
+            print(f"Node {self.node_id} message verification successful for channel {channel_id}!")
+            decrypted_payload = decrypt_payload(base64.b64decode(message['payload']), current_key)
+            print(f"Node {self.node_id} decrypted payload:", decrypted_payload)
+        else:
+            print(f"Node {self.node_id} message verification failed for channel {channel_id}!")
+
+# Main function to simulate multiple nodes
 def main():
-    # Setup CAN bus (socketcan example)
-    bus = can.interface.Bus(channel='vcan0', interface='virtual')
+    message_queue = queue.Queue()  # Shared queue for message passing
 
-
-    # Example of sending a secure message
-    send_secure_can_message(bus, 0x123, b'Hello CANsec')
-
-    # Example of receiving a secure message (expecting 48 bytes in total)
-    receive_secure_can_message(bus, 0x123, 48)
+    # Create and start multiple nodes
+    nodes = [CANsecNode(node_id=i, message_queue=message_queue) for i in range(3)]
+    for node in nodes:
+        node.start()
 
 if __name__ == "__main__":
     main()
