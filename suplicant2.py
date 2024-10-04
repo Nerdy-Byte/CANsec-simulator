@@ -10,9 +10,9 @@ PORT_SUPP2 = 65433  # Port for Supplicant 2
 
 # Supplicant parameters
 NODE_ID_SUPP2 = 2
-CHANNEL_ID = 1
+CHANNEL_ID = 2
 SESSION_KEY = b'secretkey123456'
-FRESHNESS_VALUE_SUPP2 = random.randint(1, 100)
+FRESHNESS_VALUE_SUPP2 = 1
 
 
 def receive_frame_from_supplicant1():
