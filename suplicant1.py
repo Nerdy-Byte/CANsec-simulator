@@ -1,9 +1,9 @@
 import socket
 import pickle
 import logging
-from frame import CANsecFrame
+from frame import *
 from key_cache import *
-from encryption_decryption import decrypt_payload
+from encryption_decryption import *
 import hmac
 import hashlib
 import base64
@@ -19,14 +19,15 @@ logging.basicConfig(level=logging.INFO)
 HOST = '127.0.0.1'  # Localhost
 PORT_SUPP1 = 5050  # Port for Supplicant 1
 PORT_SUPP2 = 5051  # Port for Supplicant 2
-
+SUPPLICANTS = []
 # Supplicant parameters
 NODE_ID_SUPP1 = 1
-CHANNEL_ID = os.urandom(16)
+CHANNEL_ID = os.urandom(8)
 ASSOCIATION_NUMBER = 0  # Assuming you want to start with Association Number 0
 ASSOCIATION_KEY = os.urandom(32)
 FRESHNESS_VALUE_SUPP1 = 1
 SZK = '38d541f6210132720bb608d8e721c8b7039a7fbf12ac4e27c5e1d1dd1af6b8b8'
+SZK_NAME = '89d541f6210132720bb608d8e721c8b7039a7fbf12ac4e27c5e1d1dd1af6b8a2'
 
 
 def calculate_icv(payload, sectag, key):
@@ -46,10 +47,38 @@ def calculate_icv(payload, sectag, key):
     return base64.b64encode(icv).decode()
 
 
+def handle_key_request_from_supplicant2(received_frame):
+    """
+    Supplicant 1 listens for a key request from Supplicant 2 and responds with the requested keys.
+    """
+    keyname, sci = received_frame.extract_data()
+
+    if keyname != SZK_NAME:
+        print("Invalid Key name Request Declined!")
+        return
+
+    kek, ick = derive_kek_and_ick(SZK_NAME)
+    key1 = os.urandom(32)
+    key2 = os.urandom(32)
+    add_key(CHANNEL_ID, key1)
+    add_key(sci, key2)
+    keys = {CHANNEL_ID: key1, sci: key2}
+    ecnc_key = keys
+    key_frame = keyRequest(lable="KEYS", sci=CHANNEL_ID, association_key_name=SZK_NAME, keys=ecnc_key)
+    serialized_frame = pickle.dumps(key_frame)
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect((HOST, PORT_SUPP2))
+            s.sendall(serialized_frame)
+            logging.info(f"Supplicant 1 sent CANsec frame to Supplicant 2: {key_frame}")
+    except Exception as e:
+        logging.error(f"Failed to send frame to Supplicant 2: {e}")
+
+
 def send_frame_to_supplicant2():
     # Create a CANsecFrame for Supplicant 1
-    can_frame = CANsecFrame(node_id=NODE_ID_SUPP1, channel_id=CHANNEL_ID,
-                            freshness_value=FRESHNESS_VALUE_SUPP1)
+    # channel_id_int = int.from_bytes(CHANNEL_ID, byteorder='big')
+    can_frame = CANsecFrame(channel_id=CHANNEL_ID, freshness_value=FRESHNESS_VALUE_SUPP1)
 
     # Serialize the CANsecFrame
     serialized_frame = pickle.dumps(can_frame)
@@ -80,18 +109,17 @@ def receive_frame_from_supplicant2():
                 logging.error(f"Failed to deserialize the frame: {e}")
                 return
 
-            # Extract data from received CANsecFrame
+            if isinstance(received_frame, keyRequest):
+                handle_key_request_from_supplicant2(received_frame)
+                return
+
+                # Extract data from received CANsecFrame
             data = received_frame.extract()  # Ensure this method is correctly implemented
             sectag = data['Sectag']
             icv = data['ICV']
             payload = data['Payload']
 
             key = get_key(sectag['AN'], sectag['SCI'])  # Retrieve the key
-            if key is None:
-                print(print_all_keys())
-                logging.error(f"No key found for Association Number {sectag['AN']}, Channel ID {sectag['SCI']}.")
-                return
-
             calculated_icv = calculate_icv(payload, sectag, key)
 
             if icv == calculated_icv:
@@ -102,17 +130,9 @@ def receive_frame_from_supplicant2():
                 logging.warning("Supplicant 1: ICV verification failed!")
 
 
-def keyserver():
-    # gets called as soon as new node joins
-    # request the SZK-name from the client and verify it
-    # Broadcast instruction to generate KEK and ICK
-    # generates the association keys for all the sc and broadcast them after encryption via KEK and adding ICK
-
-    pass
-
-
 if __name__ == "__main__":
-    # Supplicant 1 first adds a key, sends a frame, and then listens for a response
-    add_key(CHANNEL_ID, ASSOCIATION_KEY)  # Ensure association number is properly managed
-    send_frame_to_supplicant2()
+    # add_key(CHANNEL_ID, ASSOCIATION_KEY)
+    # send_frame_to_supplicant2()
+
+    receive_frame_from_supplicant2()
     receive_frame_from_supplicant2()

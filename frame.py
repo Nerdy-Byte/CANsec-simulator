@@ -13,18 +13,16 @@ def generate_payload(size=16):
 
 
 class CANsecFrame:
-    def __init__(self, node_id, channel_id, freshness_value, version_number=1, cipher_mode=1, an=0):
+    def __init__(self, channel_id: bytes, freshness_value, version_number=1, cipher_mode=1, an=0):
         """
         Initialize a CANsecFrame instance.
 
         Args:
-            node_id (int): The ID of the node creating the frame.
             channel_id (int): The ID of the channel for this frame.
             freshness_value (int): The freshness value (64-bit) for preventing replay attacks.
             version_number (int): The version number for the CANsec protocol.
             cipher_mode (int): The cipher mode (0 for Authentication mode, 1 for AEAD).
         """
-        self.node_id = node_id  # Initialize node_id
         self.channel_id = channel_id  # Initialize channel_id
         self.freshness_value = freshness_value  # Freshness value to prevent replay attacks
 
@@ -39,7 +37,7 @@ class CANsecFrame:
             'AN': an,  # Association Number (1-bit, set to 0 for now)
             'FV': self.freshness_value,  # Freshness Value
         }
-        sak = get_key(self.sectag['AN'], self.sectag['SCI'])
+        sak = get_key(self.sectag['AN'], self.channel_id)
         print(f"inside can frame: {sak}")
         self.payload = encrypt_payload(generate_payload(), sak)
         message_content = f"{self.payload}{self.sectag}".encode('utf-8')
@@ -57,3 +55,20 @@ class CANsecFrame:
             'ICV': icv,
             'Sectag': sectag
         }
+
+
+class keyRequest:
+    def __init__(self, lable, sci, association_key_name, keys=None):
+        self.lable = lable
+        self.sci = sci
+        self.association_key_name = association_key_name
+        self.keys = keys
+
+    def get_lable(self):
+        return self.lable
+
+    def extract_data(self):
+        return self.association_key_name, self.sci
+
+    def get_keys(self):
+        return self.keys
