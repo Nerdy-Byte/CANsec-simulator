@@ -13,8 +13,7 @@ def generate_payload(size=16):
 
 
 class CANsecFrame:
-    def __init__(self, node_id, channel_id, freshness_value, version_number=1, cipher_mode=1,
-                 channel_identifier=0x001, an=0):
+    def __init__(self, node_id, channel_id, freshness_value, version_number=1, cipher_mode=1, an=0):
         """
         Initialize a CANsecFrame instance.
 
@@ -24,7 +23,6 @@ class CANsecFrame:
             freshness_value (int): The freshness value (64-bit) for preventing replay attacks.
             version_number (int): The version number for the CANsec protocol.
             cipher_mode (int): The cipher mode (0 for Authentication mode, 1 for AEAD).
-            channel_identifier (int): The CAN Secure Channel Identifier.
         """
         self.node_id = node_id  # Initialize node_id
         self.channel_id = channel_id  # Initialize channel_id

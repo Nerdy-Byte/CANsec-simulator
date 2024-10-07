@@ -22,7 +22,7 @@ PORT_SUPP2 = 5051  # Port for Supplicant 2
 
 # Supplicant parameters
 NODE_ID_SUPP1 = 1
-CHANNEL_ID = 1
+CHANNEL_ID = os.urandom(16)
 ASSOCIATION_NUMBER = 0  # Assuming you want to start with Association Number 0
 ASSOCIATION_KEY = os.urandom(32)
 FRESHNESS_VALUE_SUPP1 = 1
@@ -100,6 +100,15 @@ def receive_frame_from_supplicant2():
                 logging.info("Supplicant 1: Decrypted Payload: %s", decrypted_payload)
             else:
                 logging.warning("Supplicant 1: ICV verification failed!")
+
+
+def keyserver():
+    # gets called as soon as new node joins
+    # request the SZK-name from the client and verify it
+    # Broadcast instruction to generate KEK and ICK
+    # generates the association keys for all the sc and broadcast them after encryption via KEK and adding ICK
+
+    pass
 
 
 if __name__ == "__main__":

@@ -15,9 +15,10 @@ PORT_SUPP2 = 5051  # Port for Supplicant 2 (sender port)
 
 # Supplicant parameters
 NODE_ID_SUPP2 = 2
-CHANNEL_ID = 2
+CHANNEL_ID = os.urandom(16)
 ASSOCIATION_KEY = os.urandom(32)
 FRESHNESS_VALUE_SUPP2 = 1
+SZK = '38d541f6210132720bb608d8e721c8b7039a7fbf12ac4e27c5e1d1dd1af6b8b8'
 
 
 def calculate_icv(payload, sectag, key):
