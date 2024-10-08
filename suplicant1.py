@@ -13,11 +13,42 @@ import os
 # also when pkt numbers are exhausted
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+# logging.basicConfig(level=logging.INFO)
+
+
+def process_key_distribution(data):
+    """
+    Process the key distribution message received from the key server.
+
+    Args:
+        data (dict): The received key distribution data.
+    """
+    encrypted_key = data['encrypted_key']
+    icv = data['ICV']
+    supp_id = data['supp_id']
+    received_channel_id = data['channel_id']
+
+    # Step 1: Derive KEK and ICK from the SZK
+    kek, ick = derive_kek_and_ick(SZK)  # Use the same SZK
+
+    # Step 2: Verify the ICV
+    calculated_icv = calculate_icv(encrypted_key, supp_id, ick)
+    if calculated_icv != icv:
+        # logging.warning("Supplicant: ICV verification failed.")
+        print("Supplicant: ICV verification failed.")
+        return
+
+    # Step 3: Decrypt the association key using KEK
+    association_key = decrypt_payload(encrypted_key, kek)
+
+    # Step 4: Store the association key
+    add_key(received_channel_id, association_key)
+    print("Supplicant: Association key stored successfully.")
+
 
 # Constants
 HOST = '127.0.0.1'  # Localhost
-PORT_SUPP1 = 5050  # Port for Supplicant 1
+PORT_SUPP1 = 5052  # Port for Supplicant 1
 PORT_SUPP2 = 5051  # Port for Supplicant 2
 SUPPLICANTS = []
 # Supplicant parameters
@@ -63,16 +94,17 @@ def handle_key_request_from_supplicant2(received_frame):
     add_key(CHANNEL_ID, key1)
     add_key(sci, key2)
     keys = {CHANNEL_ID: key1, sci: key2}
-    ecnc_key = keys
-    key_frame = keyRequest(lable="KEYS", sci=CHANNEL_ID, association_key_name=SZK_NAME, keys=ecnc_key)
+    enc_keys = encrypt_dict(keys, kek)
+    icv = calculate_ick(enc_keys, ick)
+    key_frame = keyRequest(lable="KEYS", sci=CHANNEL_ID, association_key_name=SZK_NAME, keys=enc_keys, icv=icv)
     serialized_frame = pickle.dumps(key_frame)
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((HOST, PORT_SUPP2))
             s.sendall(serialized_frame)
-            logging.info(f"Supplicant 1 sent CANsec frame to Supplicant 2: {key_frame}")
+            print(f"Supplicant 1 sent CANsec frame to Supplicant 2: {key_frame}")
     except Exception as e:
-        logging.error(f"Failed to send frame to Supplicant 2: {e}")
+        print(f"Failed to send frame to Supplicant 2: {e}")
 
 
 def send_frame_to_supplicant2():
@@ -88,7 +120,7 @@ def send_frame_to_supplicant2():
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((HOST, PORT_SUPP2))
             s.sendall(serialized_frame)
-            logging.info(f"Supplicant 1 sent CANsec frame to Supplicant 2: {can_frame}")
+            print(f"Supplicant 1 sent CANsec frame to Supplicant 2: {can_frame}")
     except Exception as e:
         logging.error(f"Failed to send frame to Supplicant 2: {e}")
 
@@ -96,43 +128,49 @@ def send_frame_to_supplicant2():
 def receive_frame_from_supplicant2():
     # Create a socket to listen for Supplicant 2's response
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Allow reusing the address
         s.bind((HOST, PORT_SUPP1))
         s.listen()
-        logging.info("Supplicant 1 is listening for a response from Supplicant 2...")
+        print("Supplicant 1 is listening for a response from Supplicant 2...")
 
-        conn, addr = s.accept()
-        with conn:
-            data = conn.recv(4096)  # Receive the serialized frame
-            try:
-                received_frame = pickle.loads(data)  # Deserialize the frame
-            except Exception as e:
-                logging.error(f"Failed to deserialize the frame: {e}")
-                return
+        while True:  # Keep listening for incoming connections
+            conn, addr = s.accept()
+            with conn:
+                data = conn.recv(4096)  # Receive the serialized frame
+                if not data:
+                    break  # No more data, exit the loop
+                try:
+                    received_frame = pickle.loads(data)  # Deserialize the frame
+                except Exception as e:
+                    print(f"Failed to deserialize the frame: {e}")
+                    return
 
-            if isinstance(received_frame, keyRequest):
-                handle_key_request_from_supplicant2(received_frame)
-                return
+                if isinstance(received_frame, keyRequest):
+                    handle_key_request_from_supplicant2(received_frame)
+                    continue
 
                 # Extract data from received CANsecFrame
-            data = received_frame.extract()  # Ensure this method is correctly implemented
-            sectag = data['Sectag']
-            icv = data['ICV']
-            payload = data['Payload']
+                data = received_frame.extract()  # Ensure this method is correctly implemented
+                sectag = data['Sectag']
+                icv = data['ICV']
+                payload = data['Payload']
+                print(f"ICV::{icv}")
+                key = get_key(sectag['AN'], sectag['SCI'])  # Retrieve the key
+                calculated_icv = calculate_icv(payload, sectag, key)
+                print(f"ICV::{calculated_icv}")
 
-            key = get_key(sectag['AN'], sectag['SCI'])  # Retrieve the key
-            calculated_icv = calculate_icv(payload, sectag, key)
-
-            if icv == calculated_icv:
-                logging.info("Supplicant 1: ICV verified successfully.")
-                decrypted_payload = decrypt_payload(payload, key)  # Use the correct decryption function
-                logging.info("Supplicant 1: Decrypted Payload: %s", decrypted_payload)
-            else:
-                logging.warning("Supplicant 1: ICV verification failed!")
+                if icv == calculated_icv:
+                    print("Supplicant 1: ICV verified successfully.")
+                    decrypted_payload = decrypt_payload(payload, key)  # Use the correct decryption function
+                    print("Supplicant 1: Decrypted Payload: %s", decrypted_payload)
+                else:
+                    print("Supplicant 1: ICV verification failed!")
 
 
 if __name__ == "__main__":
-    # add_key(CHANNEL_ID, ASSOCIATION_KEY)
-    # send_frame_to_supplicant2()
-
-    receive_frame_from_supplicant2()
-    receive_frame_from_supplicant2()
+    try:
+        receive_frame_from_supplicant2()
+    except KeyboardInterrupt:
+        print("Shutting down Supplicant 1.")
+    except Exception as e:
+        print(f"Unexpected error: {e}")

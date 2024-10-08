@@ -1,9 +1,34 @@
+import base64
 import hashlib
 import hmac
-import json
+# import json
 import os
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
+# from cryptography.fernet import Fernet
+
+
+def calculate_ick(payload, key):
+    message_content = f"{payload}".encode()
+    icv = hmac.new(key, message_content, hashlib.sha256).digest()
+    return base64.b64encode(icv).decode()
+
+
+def calculate_icv(payload, sectag, key):
+    """
+    Calculate the Integrity Check Value (ICV) based on the payload and SECTAG using HMAC.
+
+    Args:
+        payload (str): The payload data to be included in the ICV calculation.
+        sectag (dict): The SECTAG containing relevant security information.
+        key (bytes): The key used for HMAC calculation.
+
+    Returns:
+        str: Base64-encoded ICV.
+    """
+    message_content = f"{payload}{sectag}".encode('utf-8')
+    icv = hmac.new(key, message_content, hashlib.sha256).digest()
+    return base64.b64encode(icv).decode()
 
 
 def derive_kek_and_ick(sz_k):
@@ -53,43 +78,30 @@ def decrypt_payload(encrypted_payload, key):
     return unpad(decrypted_payload).decode()
 
 
-# Function to sign the message
-def sign_message(message, key):
-    message_json = json.dumps(message).encode()
-    signature = hmac.new(key, message_json, hashlib.sha256).hexdigest()
-    return signature
+# # Function to sign the message
+# def sign_message(message, key):
+#     message_json = json.dumps(message).encode()
+#     signature = hmac.new(key, message_json, hashlib.sha256).hexdigest()
+#     return signature
 
 
 # Function to verify the message
-def verify_message(message, signature, key):
-    expected_signature = sign_message(message, key)
-    return hmac.compare_digest(expected_signature, signature)
+# def verify_message(message, signature, key):
+#     expected_signature = sign_message(message, key)
+#     return hmac.compare_digest(expected_signature, signature)
 
 
-def process_key_distribution(data):
-    """
-    Process the key distribution message received from the key server.
+# Generate a key for encryption
+# def generate_key():
+#     return Fernet.generate_key()
 
-    Args:
-        data (dict): The received key distribution data.
-    """
-    encrypted_key = data['encrypted_key']
-    icv = data['ICV']
-    supp_id = data['supp_id']
-    received_channel_id = data['channel_id']
 
-    # Step 1: Derive KEK and ICK from the SZK
-    kek, ick = derive_kek_and_ick(SZK)  # Use the same SZK
+# Encrypt a dictionary
+def encrypt_dict(input_dict, kek):
+    """Encrypts the dictionary using the KEK and returns a Base64-encoded string."""
+    return input_dict
 
-    # Step 2: Verify the ICV
-    calculated_icv = calculate_icv(encrypted_key, supp_id, ick)
-    if calculated_icv != icv:
-        logging.warning("Supplicant: ICV verification failed.")
-        return
 
-    # Step 3: Decrypt the association key using KEK
-    association_key = decrypt_payload(encrypted_key, kek)
-
-    # Step 4: Store the association key
-    add_key(received_channel_id, association_key)
-    logging.info("Supplicant: Association key stored successfully.")
+def decrypt_dict(encrypted_str, kek):
+    """Decrypts the Base64-encoded string back to a dictionary."""
+    return encrypted_str

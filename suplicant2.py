@@ -10,7 +10,7 @@ import os
 
 # Constants
 HOST = '127.0.0.1'  # Localhost
-PORT_SUPP1 = 5050  # Port for Supplicant 1 (receiver port)
+PORT_SUPP1 = 5052  # Port for Supplicant 1 (receiver port)
 PORT_SUPP2 = 5051  # Port for Supplicant 2 (sender port)
 
 # Supplicant parameters
@@ -45,7 +45,7 @@ def calculate_icv(payload, sectag, key):
 
 
 def getKeys():
-    key_pkt = keyRequest(lable="JOIN_REQUEST", sci=CHANNEL_ID, association_key_name=SZK_NAME)
+    key_pkt = keyRequest(lable="JOIN_REQUEST", sci=CHANNEL_ID, association_key_name=SZK_NAME, icv=None)
     serialized_frame = pickle.dumps(key_pkt)
 
     # Send the frame to Supplicant 1
@@ -64,7 +64,14 @@ def receive_keys_from_supplicant1(key_frame):
     """
     kek, ick = derive_kek_and_ick(SZK_NAME)
     keys_data = key_frame.get_keys()
-    keys = keys_data
+    calc_icv = calculate_ick(keys_data, ick)
+
+    if key_frame.get_icv() != calc_icv:
+        print("ICV Mismatch!")
+        return
+
+    keys = decrypt_dict(keys_data, kek)
+    # calculated_icv = calculate_icv(keys_data, CHANNEL_ID, ick)
 
     for key, value in keys.items():
         add_key(key, value)

@@ -40,8 +40,8 @@ class CANsecFrame:
         sak = get_key(self.sectag['AN'], self.channel_id)
         print(f"inside can frame: {sak}")
         self.payload = encrypt_payload(generate_payload(), sak)
-        message_content = f"{self.payload}{self.sectag}".encode('utf-8')
-        self.icv = hmac.new(sak, message_content, hashlib.sha256).digest()  # Initialize ICV
+        # message_content = f"{self.payload}{self.sectag}".encode('utf-8')
+        self.icv = calculate_icv(self.payload, self.sectag, sak)
 
     def extract(self):
         """Extract SCI, AN, Payload, and ICV from the frame."""
@@ -58,11 +58,12 @@ class CANsecFrame:
 
 
 class keyRequest:
-    def __init__(self, lable, sci, association_key_name, keys=None):
+    def __init__(self, lable, sci, association_key_name, keys=None, icv=None):
         self.lable = lable
         self.sci = sci
         self.association_key_name = association_key_name
         self.keys = keys
+        self.icv = icv
 
     def get_lable(self):
         return self.lable
@@ -72,3 +73,6 @@ class keyRequest:
 
     def get_keys(self):
         return self.keys
+
+    def get_icv(self):
+        return self.icv
