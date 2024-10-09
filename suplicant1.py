@@ -15,42 +15,42 @@ PORT_SUPP1 = 5052  # Port for Supplicant 1
 PORT_SUPP2 = 5051  # Port for Supplicant 2
 SUPPLICANTS = []
 CHANNEL_ID = os.urandom(8)
-ASSOCIATION_NUMBER = 1  # Assuming you want to start with Association Number 0
+ASSOCIATION_NUMBER = 1
 ASSOCIATION_KEY = os.urandom(32)
-FRESHNESS_VALUE_SUPP1 = 10
+MAX_PN_LIMIT = 10
 PACKET_NUMBER = 1
 SZK = '38d541f6210132720bb608d8e721c8b7039a7fbf12ac4e27c5e1d1dd1af6b8b8'
 SZK_NAME = '89d541f6210132720bb608d8e721c8b7039a7fbf12ac4e27c5e1d1dd1af6b8a2'
+FRESHNESS_VALUE_SUPP2 = 0
 
 
-def process_key_distribution(data):
-    """
-    Process the key distribution message received from the key server.
-
-    Args:
-        data (dict): The received key distribution data.
-    """
-    encrypted_key = data['encrypted_key']
-    icv = data['ICV']
-    supp_id = data['supp_id']
-    received_channel_id = data['channel_id']
-
-    # Step 1: Derive KEK and ICK from the SZK
-    kek, ick = derive_kek_and_ick(SZK)  # Use the same SZK
-
-    # Step 2: Verify the ICV
-    calculated_icv = calculate_icv(encrypted_key, supp_id, ick)
-    if calculated_icv != icv:
-        # logging.warning("Supplicant: ICV verification failed.")
-        print("Supplicant: ICV verification failed.")
-        return
-
-    # Step 3: Decrypt the association key using KEK
-    association_key = decrypt_payload(encrypted_key, kek)
-    # Step 4: Store the association key
-    add_key(ASSOCIATION_NUMBER, received_channel_id, association_key)
-    print("Supplicant: Association key stored successfully.")
-
+# def process_key_distribution(data):
+#     """
+#     Process the key distribution message received from the key server.
+#
+#     Args:
+#         data (dict): The received key distribution data.
+#     """
+#     encrypted_key = data['encrypted_key']
+#     icv = data['ICV']
+#     supp_id = data['supp_id']
+#     received_channel_id = data['channel_id']
+#
+#     # Step 1: Derive KEK and ICK from the SZK
+#     kek, ick = derive_kek_and_ick(SZK)  # Use the same SZK
+#
+#     # Step 2: Verify the ICV
+#     calculated_icv = calculate_icv(encrypted_key, supp_id, ick)
+#     if calculated_icv != icv:
+#         # logging.warning("Supplicant: ICV verification failed.")
+#         print("Supplicant: ICV verification failed.")
+#         return
+#
+#     # Step 3: Decrypt the association key using
+#     association_key = decrypt_payload(encrypted_key, kek)
+#     # Step 4: Store the association key
+#     add_key(ASSOCIATION_NUMBER, received_channel_id, association_key)
+#     print("Supplicant: Association key stored successfully.")
 
 
 def calculate_icv(payload, sectag, key):
@@ -74,7 +74,7 @@ def handle_key_request_from_supplicant2(received_frame):
     """
     Supplicant 1 listens for a key request from Supplicant 2 and responds with the requested keys.
     """
-    global ASSOCIATION_NUMBER
+    global ASSOCIATION_NUMBER, FRESHNESS_VALUE_SUPP2
     ASSOCIATION_NUMBER = 1 - ASSOCIATION_NUMBER
     keyname, sci = received_frame.extract_data()
 
@@ -93,6 +93,7 @@ def handle_key_request_from_supplicant2(received_frame):
     key_frame = keyRequest(lable="KEYS", sci=CHANNEL_ID, association_key_name=SZK_NAME, keys=enc_keys, icv=icv,
                            an=ASSOCIATION_NUMBER)
     serialized_frame = pickle.dumps(key_frame)
+    FRESHNESS_VALUE_SUPP2 = 0
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((HOST, PORT_SUPP2))
@@ -105,14 +106,14 @@ def handle_key_request_from_supplicant2(received_frame):
 def send_frame_to_supplicant2():
     # Create a CANsecFrame for Supplicant 1
     # channel_id_int = int.from_bytes(CHANNEL_ID, byteorder='big')
-    global PACKET_NUMBER, FRESHNESS_VALUE_SUPP1
+    global PACKET_NUMBER, MAX_PN_LIMIT
 
-    if PACKET_NUMBER >= FRESHNESS_VALUE_SUPP1:
+    if PACKET_NUMBER >= MAX_PN_LIMIT:
         can_frame = keyRequest(lable="SEND-SCI", sci=CHANNEL_ID, association_key_name=SZK_NAME,
                                an=ASSOCIATION_NUMBER)
     else:
         can_frame = CANsecFrame(channel_id=CHANNEL_ID, freshness_value=PACKET_NUMBER)
-        PACKET_NUMBER = PACKET_NUMBER+1
+        PACKET_NUMBER = PACKET_NUMBER + 1
 
     # Serialize the CANsecFrame
     serialized_frame = pickle.dumps(can_frame)
@@ -151,15 +152,24 @@ def receive_frame_from_supplicant2():
                     handle_key_request_from_supplicant2(received_frame)
                     continue
 
+                global FRESHNESS_VALUE_SUPP2
+
+                if received_frame.get_freshness_value() <= FRESHNESS_VALUE_SUPP2:
+                    print("Old packet Dropping the packet!")
+                    return
+
+                else:
+                    FRESHNESS_VALUE_SUPP2 = received_frame.get_freshness_value()
+
                 # Extract data from received CANsecFrame
-                data = received_frame.extract()  # Ensure this method is correctly implemented
+                data = received_frame.extract()
                 sectag = data['Sectag']
                 icv = data['ICV']
                 payload = data['Payload']
-                print(f"ICV::{icv}")
+                print(f"RECEIVED ICV::{icv}")
                 key = get_key(sectag['AN'], sectag['SCI'])  # Retrieve the key
                 calculated_icv = calculate_icv(payload, sectag, key)
-                print(f"ICV::{calculated_icv}")
+                print(f"CALCULATED ICV::{calculated_icv}")
 
                 if icv == calculated_icv:
                     print("Supplicant 1: ICV verified successfully.")

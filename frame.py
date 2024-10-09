@@ -55,6 +55,9 @@ class CANsecFrame:
             'Sectag': sectag
         }
 
+    def get_freshness_value(self):
+        return self.freshness_value
+
 
 class keyRequest:
     def __init__(self, lable, sci, association_key_name, keys=None, icv=None, an=0):

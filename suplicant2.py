@@ -16,10 +16,11 @@ PORT_SUPP2 = 5051  # Port for Supplicant 2 (sender port)
 
 # Supplicant parameters
 CHANNEL_ID = os.urandom(8)
-FRESHNESS_VALUE_SUPP2 = 10
+MAX_PN_LIMIT = 10
 SZK = '38d541f6210132720bb608d8e721c8b7039a7fbf12ac4e27c5e1d1dd1af6b8b8'
 SZK_NAME = '89d541f6210132720bb608d8e721c8b7039a7fbf12ac4e27c5e1d1dd1af6b8a2'
 PACKET_NUMBER = 1
+FRESHNESS_VALUE_SUPP1 = 0
 
 
 def calculate_icv(payload, sectag, key):
@@ -57,6 +58,7 @@ def receive_keys_from_supplicant1(key_frame):
     """
     Receives keys from Supplicant 1, decrypts and stores them for Supplicant 2.
     """
+    global FRESHNESS_VALUE_SUPP1
     kek, ick = derive_kek_and_ick(SZK_NAME)
     keys_data = key_frame.get_keys()
     calc_icv = calculate_ick(keys_data, ick)
@@ -70,6 +72,8 @@ def receive_keys_from_supplicant1(key_frame):
     an = key_frame.get_association_number()
     for key, value in keys.items():
         add_key(an, key, value)
+
+    FRESHNESS_VALUE_SUPP1 = 0
 
 
 def receive_frame_from_supplicant1():
@@ -94,7 +98,7 @@ def receive_frame_from_supplicant1():
                     return
 
             # Extract data from received CANsecFrame
-            frame_data = received_frame.extract()  # Ensure this method is correctly implemented
+            frame_data = received_frame.extract()
             sectag = frame_data['Sectag']
             icv = frame_data['ICV']
             payload = frame_data['Payload']
@@ -107,28 +111,23 @@ def receive_frame_from_supplicant1():
                 return
 
             calculated_icv = calculate_icv(payload, sectag, key)
-
+            global FRESHNESS_VALUE_SUPP1
+            if FRESHNESS_VALUE_SUPP1 <= received_frame.get_freshness_value():
+                print("Old frame Dropping the packet!")
+                return
             if icv == calculated_icv:
                 print("Supplicant 2: ICV verified successfully.")
                 decrypted_payload = decrypt_payload(payload, key)  # Use the correct decryption function
+                FRESHNESS_VALUE_SUPP1 = received_frame.get_freshness_value()
                 print("Supplicant 2: Decrypted Payload:", decrypted_payload)
             else:
                 print("Supplicant 2: ICV verification failed!")
 
 
 def send_frame_to_supplicant1():
-    # Example Association Number
-    an = 0  # Adjust this as needed
-    sci = CHANNEL_ID  # Use the correct Channel ID or SCI
-    global PACKET_NUMBER, FRESHNESS_VALUE_SUPP2
-    # Try to retrieve the key from the cache
-    try:
-        # key = get_key(an, sci)
-        print(f"Supplicant 2: Key found for Association Number {an}, Channel ID {sci.hex()}.")
-    except ValueError:
-        print(f"Supplicant 2: No key found for Association Number {an}, Channel ID {sci.hex()}.")
 
-    if PACKET_NUMBER >= FRESHNESS_VALUE_SUPP2:
+    global PACKET_NUMBER, MAX_PN_LIMIT
+    if PACKET_NUMBER >= MAX_PN_LIMIT:
         getKeys()
         PACKET_NUMBER = 1
         receive_frame_from_supplicant1()
@@ -136,7 +135,7 @@ def send_frame_to_supplicant1():
 
     # channel_id_int = int.from_bytes(CHANNEL_ID, byteorder='big')
     can_frame = CANsecFrame(channel_id=CHANNEL_ID, freshness_value=PACKET_NUMBER)
-    PACKET_NUMBER = PACKET_NUMBER+1
+    PACKET_NUMBER = PACKET_NUMBER + 1
 
     # Serialize the CANsecFrame
     serialized_frame = pickle.dumps(can_frame)
@@ -157,4 +156,3 @@ if __name__ == "__main__":
     while True:
         send_frame_to_supplicant1()
         time.sleep(2)
-
