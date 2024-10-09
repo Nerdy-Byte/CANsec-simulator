@@ -58,12 +58,13 @@ class CANsecFrame:
 
 
 class keyRequest:
-    def __init__(self, lable, sci, association_key_name, keys=None, icv=None):
+    def __init__(self, lable, sci, association_key_name, keys=None, icv=None, an=0):
         self.lable = lable
         self.sci = sci
         self.association_key_name = association_key_name
         self.keys = keys
         self.icv = icv
+        self.an = an
 
     def get_lable(self):
         return self.lable
@@ -76,3 +77,6 @@ class keyRequest:
 
     def get_icv(self):
         return self.icv
+
+    def get_association_number(self):
+        return self.an

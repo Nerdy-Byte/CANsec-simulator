@@ -2,23 +2,24 @@ from typing import Optional
 
 keys = {0: {}, 1: {}}
 # Global ASSOCIATION_NUMBER variable
-ASSOCIATION_NUMBER = 0  # Initially set to 0
+# ASSOCIATION_NUMBER = 0  # Initially set to 0
 
 
-def add_key(channel_id: bytes, key: bytes):
+def add_key(an: int, channel_id: bytes, key: bytes):
     """
     Add a key for the specified channel_id under the current ASSOCIATION_NUMBER.
 
     Args:
-        channel_id (bytes): The channel identifier.
-        key (bytes): The key to be added for the channel.
+        :param key: The key to be added for the channel.
+        :param channel_id: The channel identifier.
+        :param an: Association Number
     """
     # Convert the channel_id to an integer to use as the dictionary key
     channel_id_int = int.from_bytes(channel_id, byteorder='big')
 
     # Add or update the key in the keys dictionary under the current ASSOCIATION_NUMBER
-    keys[ASSOCIATION_NUMBER][channel_id_int] = key
-    print(f"Key added for channel {channel_id_int} under association number {ASSOCIATION_NUMBER}.")
+    keys[an][channel_id_int] = key
+    print(f"Key added for channel {channel_id_int} under association number {an}.")
 
 
 def get_key(association_number: int, channel_id: bytes) -> Optional[bytes]:

@@ -15,6 +15,20 @@ import os
 # Setup logging
 # logging.basicConfig(level=logging.INFO)
 
+# Constants
+HOST = '127.0.0.1'  # Localhost
+PORT_SUPP1 = 5052  # Port for Supplicant 1
+PORT_SUPP2 = 5051  # Port for Supplicant 2
+SUPPLICANTS = []
+# Supplicant parameters
+# NODE_ID_SUPP1 = 1
+CHANNEL_ID = os.urandom(8)
+ASSOCIATION_NUMBER = 1  # Assuming you want to start with Association Number 0
+ASSOCIATION_KEY = os.urandom(32)
+FRESHNESS_VALUE_SUPP1 = 1
+SZK = '38d541f6210132720bb608d8e721c8b7039a7fbf12ac4e27c5e1d1dd1af6b8b8'
+SZK_NAME = '89d541f6210132720bb608d8e721c8b7039a7fbf12ac4e27c5e1d1dd1af6b8a2'
+
 
 def process_key_distribution(data):
     """
@@ -40,25 +54,10 @@ def process_key_distribution(data):
 
     # Step 3: Decrypt the association key using KEK
     association_key = decrypt_payload(encrypted_key, kek)
-
     # Step 4: Store the association key
-    add_key(received_channel_id, association_key)
+    add_key(ASSOCIATION_NUMBER, received_channel_id, association_key)
     print("Supplicant: Association key stored successfully.")
 
-
-# Constants
-HOST = '127.0.0.1'  # Localhost
-PORT_SUPP1 = 5052  # Port for Supplicant 1
-PORT_SUPP2 = 5051  # Port for Supplicant 2
-SUPPLICANTS = []
-# Supplicant parameters
-NODE_ID_SUPP1 = 1
-CHANNEL_ID = os.urandom(8)
-ASSOCIATION_NUMBER = 0  # Assuming you want to start with Association Number 0
-ASSOCIATION_KEY = os.urandom(32)
-FRESHNESS_VALUE_SUPP1 = 1
-SZK = '38d541f6210132720bb608d8e721c8b7039a7fbf12ac4e27c5e1d1dd1af6b8b8'
-SZK_NAME = '89d541f6210132720bb608d8e721c8b7039a7fbf12ac4e27c5e1d1dd1af6b8a2'
 
 
 def calculate_icv(payload, sectag, key):
@@ -82,6 +81,8 @@ def handle_key_request_from_supplicant2(received_frame):
     """
     Supplicant 1 listens for a key request from Supplicant 2 and responds with the requested keys.
     """
+    global ASSOCIATION_NUMBER
+    ASSOCIATION_NUMBER = 1 - ASSOCIATION_NUMBER
     keyname, sci = received_frame.extract_data()
 
     if keyname != SZK_NAME:
@@ -91,12 +92,13 @@ def handle_key_request_from_supplicant2(received_frame):
     kek, ick = derive_kek_and_ick(SZK_NAME)
     key1 = os.urandom(32)
     key2 = os.urandom(32)
-    add_key(CHANNEL_ID, key1)
-    add_key(sci, key2)
+    add_key(ASSOCIATION_NUMBER, CHANNEL_ID, key1)
+    add_key(ASSOCIATION_NUMBER, sci, key2)
     keys = {CHANNEL_ID: key1, sci: key2}
     enc_keys = encrypt_dict(keys, kek)
     icv = calculate_ick(enc_keys, ick)
-    key_frame = keyRequest(lable="KEYS", sci=CHANNEL_ID, association_key_name=SZK_NAME, keys=enc_keys, icv=icv)
+    key_frame = keyRequest(lable="KEYS", sci=CHANNEL_ID, association_key_name=SZK_NAME, keys=enc_keys, icv=icv,
+                           an=ASSOCIATION_NUMBER)
     serialized_frame = pickle.dumps(key_frame)
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

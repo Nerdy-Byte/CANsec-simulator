@@ -7,6 +7,7 @@ import hmac
 import hashlib
 import base64
 import os
+import time
 
 # Constants
 HOST = '127.0.0.1'  # Localhost
@@ -15,10 +16,10 @@ PORT_SUPP2 = 5051  # Port for Supplicant 2 (sender port)
 
 # Supplicant parameters
 CHANNEL_ID = os.urandom(8)
-FRESHNESS_VALUE_SUPP2 = 1
+FRESHNESS_VALUE_SUPP2 = 10
 SZK = '38d541f6210132720bb608d8e721c8b7039a7fbf12ac4e27c5e1d1dd1af6b8b8'
 SZK_NAME = '89d541f6210132720bb608d8e721c8b7039a7fbf12ac4e27c5e1d1dd1af6b8a2'
-
+PACKET_NUMBER = 1
 
 # Function to derive KEK and ICK from SZK
 # def derive_kek_and_ick(sz_k):
@@ -72,9 +73,9 @@ def receive_keys_from_supplicant1(key_frame):
 
     keys = decrypt_dict(keys_data, kek)
     # calculated_icv = calculate_icv(keys_data, CHANNEL_ID, ick)
-
+    an = key_frame.get_association_number()
     for key, value in keys.items():
-        add_key(key, value)
+        add_key(an, key, value)
 
 
 def receive_frame_from_supplicant1():
@@ -122,13 +123,19 @@ def send_frame_to_supplicant1():
     # Example Association Number
     an = 0  # Adjust this as needed
     sci = CHANNEL_ID  # Use the correct Channel ID or SCI
-
+    global PACKET_NUMBER, FRESHNESS_VALUE_SUPP2
     # Try to retrieve the key from the cache
     try:
         # key = get_key(an, sci)
         print(f"Supplicant 2: Key found for Association Number {an}, Channel ID {sci.hex()}.")
     except ValueError:
         print(f"Supplicant 2: No key found for Association Number {an}, Channel ID {sci.hex()}.")
+
+    if PACKET_NUMBER >= FRESHNESS_VALUE_SUPP2:
+        getKeys()
+        PACKET_NUMBER = 1
+        receive_frame_from_supplicant1()
+        return
 
         # Add the key to the cache for the given association number and channel ID
         # ASSOCIATION_KEY = os.urandom(32)  # Generate a new association key
@@ -138,7 +145,8 @@ def send_frame_to_supplicant1():
 
     # Continue with CANsec frame creation
     # channel_id_int = int.from_bytes(CHANNEL_ID, byteorder='big')
-    can_frame = CANsecFrame(channel_id=CHANNEL_ID, freshness_value=FRESHNESS_VALUE_SUPP2)
+    can_frame = CANsecFrame(channel_id=CHANNEL_ID, freshness_value=PACKET_NUMBER)
+    PACKET_NUMBER = PACKET_NUMBER+1
 
     # Serialize the CANsecFrame
     serialized_frame = pickle.dumps(can_frame)
@@ -154,7 +162,9 @@ def send_frame_to_supplicant1():
 
 
 if __name__ == "__main__":
-    # Supplicant 2 first listens for a frame and then sends a response
     getKeys()
     receive_frame_from_supplicant1()
-    send_frame_to_supplicant1()
+    while True:
+        send_frame_to_supplicant1()
+        time.sleep(2)
+
