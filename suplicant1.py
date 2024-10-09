@@ -9,23 +9,16 @@ import hashlib
 import base64
 import os
 
-# its assumed that supplicant 1 will act as the key server when new supplicant joins the network and
-# also when pkt numbers are exhausted
-
-# Setup logging
-# logging.basicConfig(level=logging.INFO)
-
 # Constants
 HOST = '127.0.0.1'  # Localhost
 PORT_SUPP1 = 5052  # Port for Supplicant 1
 PORT_SUPP2 = 5051  # Port for Supplicant 2
 SUPPLICANTS = []
-# Supplicant parameters
-# NODE_ID_SUPP1 = 1
 CHANNEL_ID = os.urandom(8)
 ASSOCIATION_NUMBER = 1  # Assuming you want to start with Association Number 0
 ASSOCIATION_KEY = os.urandom(32)
-FRESHNESS_VALUE_SUPP1 = 1
+FRESHNESS_VALUE_SUPP1 = 10
+PACKET_NUMBER = 1
 SZK = '38d541f6210132720bb608d8e721c8b7039a7fbf12ac4e27c5e1d1dd1af6b8b8'
 SZK_NAME = '89d541f6210132720bb608d8e721c8b7039a7fbf12ac4e27c5e1d1dd1af6b8a2'
 
@@ -112,7 +105,14 @@ def handle_key_request_from_supplicant2(received_frame):
 def send_frame_to_supplicant2():
     # Create a CANsecFrame for Supplicant 1
     # channel_id_int = int.from_bytes(CHANNEL_ID, byteorder='big')
-    can_frame = CANsecFrame(channel_id=CHANNEL_ID, freshness_value=FRESHNESS_VALUE_SUPP1)
+    global PACKET_NUMBER, FRESHNESS_VALUE_SUPP1
+
+    if PACKET_NUMBER >= FRESHNESS_VALUE_SUPP1:
+        can_frame = keyRequest(lable="SEND-SCI", sci=CHANNEL_ID, association_key_name=SZK_NAME,
+                               an=ASSOCIATION_NUMBER)
+    else:
+        can_frame = CANsecFrame(channel_id=CHANNEL_ID, freshness_value=PACKET_NUMBER)
+        PACKET_NUMBER = PACKET_NUMBER+1
 
     # Serialize the CANsecFrame
     serialized_frame = pickle.dumps(can_frame)

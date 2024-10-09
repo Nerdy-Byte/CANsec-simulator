@@ -21,12 +21,6 @@ SZK = '38d541f6210132720bb608d8e721c8b7039a7fbf12ac4e27c5e1d1dd1af6b8b8'
 SZK_NAME = '89d541f6210132720bb608d8e721c8b7039a7fbf12ac4e27c5e1d1dd1af6b8a2'
 PACKET_NUMBER = 1
 
-# Function to derive KEK and ICK from SZK
-# def derive_kek_and_ick(sz_k):
-#     kek = hashlib.sha256(f"{sz_k}KEK".encode('utf-8')).digest()
-#     ick = hashlib.sha256(f"{sz_k}ICK".encode('utf-8')).digest()
-#     return kek, ick
-
 
 def calculate_icv(payload, sectag, key):
     """
@@ -93,8 +87,11 @@ def receive_frame_from_supplicant1():
             received_frame = pickle.loads(data)  # Deserialize the frame
 
             if isinstance(received_frame, keyRequest):
-                receive_keys_from_supplicant1(received_frame)
-                return
+                if received_frame.get_lable() == "SEND-SCI":
+                    getKeys()
+                else:
+                    receive_keys_from_supplicant1(received_frame)
+                    return
 
             # Extract data from received CANsecFrame
             frame_data = received_frame.extract()  # Ensure this method is correctly implemented
@@ -137,13 +134,6 @@ def send_frame_to_supplicant1():
         receive_frame_from_supplicant1()
         return
 
-        # Add the key to the cache for the given association number and channel ID
-        # ASSOCIATION_KEY = os.urandom(32)  # Generate a new association key
-        # add_key(sci, ASSOCIATION_KEY)  # Add the key to the cache
-        # key = ASSOCIATION_KEY
-        # print(f"Supplicant 2: New key generated and added to cache: {ASSOCIATION_KEY.hex()}")
-
-    # Continue with CANsec frame creation
     # channel_id_int = int.from_bytes(CHANNEL_ID, byteorder='big')
     can_frame = CANsecFrame(channel_id=CHANNEL_ID, freshness_value=PACKET_NUMBER)
     PACKET_NUMBER = PACKET_NUMBER+1

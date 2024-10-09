@@ -1,5 +1,4 @@
 import string
-import base64
 import random
 from encryption_decryption import *
 from key_cache import *

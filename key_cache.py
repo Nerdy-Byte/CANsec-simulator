@@ -1,8 +1,6 @@
 from typing import Optional
 
 keys = {0: {}, 1: {}}
-# Global ASSOCIATION_NUMBER variable
-# ASSOCIATION_NUMBER = 0  # Initially set to 0
 
 
 def add_key(an: int, channel_id: bytes, key: bytes):
@@ -46,22 +44,3 @@ def get_key(association_number: int, channel_id: bytes) -> Optional[bytes]:
         raise ValueError(f"No key found for Association Number {association_number}, Channel ID {channel_id.hex()}")
 
     return key
-
-
-# def print_all_keys():
-#     """Print all keys stored in key_store and current_keys."""
-#     global key_store, current_keys
-#
-#     print("All keys in key_store:")
-#     if key_store:
-#         for (association_number, channel_id), key in key_store.items():
-#             print(f"Association Number: {association_number}, Channel ID: {channel_id.hex()}, Key: {key.hex()}")
-#     else:
-#         print("No keys found in key_store.")
-#
-#     print("\nCurrent keys in current_keys:")
-#     if current_keys:
-#         for association_number, key in current_keys.items():
-#             print(f"Association Number: {association_number}, Key: {key.hex()}")
-#     else:
-#         print("No keys found in current_keys.")

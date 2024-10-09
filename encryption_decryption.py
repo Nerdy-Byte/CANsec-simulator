@@ -1,10 +1,12 @@
 import base64
 import hashlib
 import hmac
-# import json
 import os
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
+from cryptography.fernet import Fernet
+
+
 # from cryptography.fernet import Fernet
 
 
@@ -39,12 +41,16 @@ def derive_kek_and_ick(sz_k):
         sz_k (str): The shared Secure Zone Key (SZK).
 
     Returns:
-        tuple: The derived KEK and ICK.
+        tuple: The derived KEK (Fernet key) and ICK (binary).
     """
-    kek = hashlib.sha256(f"{sz_k}KEK".encode('utf-8')).digest()  # Derive KEK from SZK
-    ick = hashlib.sha256(f"{sz_k}ICK".encode('utf-8')).digest()  # Derive ICK from SZK
+    # Derive KEK from SZK
+    kek_raw = hashlib.sha256(f"{sz_k}KEK".encode('utf-8')).digest()  # 32 bytes
+    kek = base64.urlsafe_b64encode(kek_raw)  # Encode to Base64 for Fernet
 
-    return kek, ick
+    # Derive ICK from SZK
+    ick = hashlib.sha256(f"{sz_k}ICK".encode('utf-8')).digest()  # 32 bytes
+
+    return kek.decode('utf-8'), ick  # Return KEK as string, ICK as bytes
 
 
 def pad(data):
@@ -78,30 +84,25 @@ def decrypt_payload(encrypted_payload, key):
     return unpad(decrypted_payload).decode()
 
 
-# # Function to sign the message
-# def sign_message(message, key):
-#     message_json = json.dumps(message).encode()
-#     signature = hmac.new(key, message_json, hashlib.sha256).hexdigest()
-#     return signature
-
-
-# Function to verify the message
-# def verify_message(message, signature, key):
-#     expected_signature = sign_message(message, key)
-#     return hmac.compare_digest(expected_signature, signature)
-
-
-# Generate a key for encryption
-# def generate_key():
-#     return Fernet.generate_key()
-
-
-# Encrypt a dictionary
 def encrypt_dict(input_dict, kek):
-    """Encrypts the dictionary using the KEK and returns a Base64-encoded string."""
+    """
+    Encrypts the dictionary values by first converting them into bytes and then encrypting.
+    Returns the dictionary with encrypted (Base64-encoded) values.
+    """
+    f = Fernet(kek)
+    for key, values in input_dict.items():
+        input_dict[key] = f.encrypt(values)
+
     return input_dict
 
 
-def decrypt_dict(encrypted_str, kek):
-    """Decrypts the Base64-encoded string back to a dictionary."""
-    return encrypted_str
+def decrypt_dict(input_dict, kek):
+    """
+    Decrypts the dictionary values by first converting Base64-encoded strings into bytes,
+    then decrypting them, and converting the result back into strings.
+    """
+    f = Fernet(kek)
+    for key, values in input_dict.items():
+        input_dict[key] = f.decrypt(values)
+
+    return input_dict
